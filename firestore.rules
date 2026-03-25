@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, name, email, photoURL, role, createdAt
+    //
+    // Collection: tasks
+    // Fields: uid, title, deadline, priority, status, createdAt
+    //
+    // Collection: notes
+    // Fields: uid, title, content, tags, lastModified
+    //
+    // Collection: performance
+    // Fields: uid, month, grade, studyHours, createdAt
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'name', 'email', 'photoURL', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['student', 'admin'];
+    }
+
+    function isValidTask(data) {
+      return hasOnlyAllowedFields(['uid', 'title', 'deadline', 'priority', 'status', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.priority in ['low', 'medium', 'high'] &&
+             data.status in ['pending', 'completed'];
+    }
+
+    function isValidNote(data) {
+      return hasOnlyAllowedFields(['uid', 'title', 'content', 'tags', 'lastModified']) &&
+             data.uid == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.content is string && data.tags is list;
+    }
+
+    function isValidPerformance(data) {
+      return hasOnlyAllowedFields(['uid', 'month', 'grade', 'studyHours', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.grade is number && data.grade >= 0 && data.grade <= 100 &&
+             data.studyHours is number && data.studyHours >= 0;
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && uidNotModified();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidTask(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidTask(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /notes/{noteId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidNote(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidNote(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /performance/{perfId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidPerformance(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidPerformance(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+  }
+}
